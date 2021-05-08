@@ -1,0 +1,948 @@
+---
+title: "Final Project - Data Wrangling"
+author: "Swarup K Rakshit"
+date: "04/26/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+#### Final Project Description
+
+Project is about a recent incident that happened around Game Stop Short Squeeze. Idea is to extract data from wikipedia (using the rvest package), twitter (using the rtweet package), reddit’s wallstreetbets group data (using RedditExtractoR package), wrangle datasets and make it ready for the next phase of analysis. Eventually these data will be utilized to perform sentiment analysis, quantitative analysis and topic modelling using various techniques available in the field of natural language processing.
+
+As per the review paper by Maurizio Naldi, 2019 around sentiment analysis there are 4 such packages by which sentiment analysis can be performed using R language,
+
+1. Syuzhet;
+2. Rsentiment;
+3. SentimentR;
+4. SentimentAnalysis.
+
+First part of this project is to perform sentiment analysis on Twitter and Reddit’s data extracted in the previous phase and leverage above packages to perform this analysis. Each package covers various aspects of sentiment analysis. Significant features of each package will be explored to provide meaningful insight of sentiment analysis on game stop data.
+Second part of this project is to perform Quantitative analysis using the quanteda package. Third part of this project is to perform Topic modelling using Latent Dirichlet allocation (LDA), Bag of Words, TF-IDF, Word2Vec etc. methodologies. 
+
+References:-
+
+1. Game Stop Short Squeeze.
+2. Rvest package.
+3. Rtweet package.
+4. RedditExtractorR package.
+5. A review of sentiment computation methods with R packages by Maurizio Naldi
+6. Syuzhet package.
+7. Rsentiment package.
+8. SentimentR package.
+9. SentimentAnalysis package.
+10. Quanteda package.
+11. Topicmodels package.
+
+#### Install necessary packages
+
+```{r install_packages}
+
+#install.packages("rvest")
+#install.packages("tidyverse")
+#install.packages("stringr")
+#install.packages("sjmisc")
+#install.packages("lubridate")
+#install.packages("RedditExtractoR")
+#install.packages("tm")
+#install.packages("syuzhet")
+#install.packages("pander")
+#install.packages("rlist")
+#install.packages("sentimentr")
+#install.packages("magrittr")
+#install.packages("stringi")
+#install.packages("pacman")
+#install.packages("textcorpus")
+#install.packages("textshape")
+#install.packages("textreadr")
+#install.packages("textclean")
+#install.packages("numform")
+#install.packages("xml2")
+#install.packages("tidytext")
+#install.packages("purrr")
+#install.packages(rtweet")
+#install.packages(RColorBrewer")
+#install.packages(wordcloud")
+#install.packages("data.table")
+
+```
+
+#### Load necessary packages
+
+```{r load_packages, message=FALSE, warning=FALSE}
+library(rvest)
+library(tidyverse)
+library(stringr)
+library(sjmisc)
+library(lubridate)
+library(RedditExtractoR)
+library(tm)
+library(syuzhet)
+library(pander)
+library(rlist)
+library(sentimentr)
+library(magrittr)
+library(stringi)
+library(pacman)
+library(textcorpus)
+library(textshape)
+library(textreadr)
+library(textclean)
+library(numform)
+library(xml2)
+library(data.table)
+library(tidytext)
+library(purrr)
+library(rtweet)
+library(RColorBrewer)
+library(wordcloud)
+```
+
+#### Setting Working Directory
+
+```{r setting_working_directory, message=FALSE, warning=FALSE}
+
+setwd("~/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/final-project/msds-data-wragling-project")
+
+```
+
+***
+
+#### Extracting Game Stop Short Squenze data from Wikipedia page.
+
+```{r extract_data_from_wiki_by_rvest, message=FALSE, warning=FALSE}
+
+url <- "https://en.wikipedia.org/wiki/GameStop_short_squeeze"
+html <- read_html(url)
+
+# read all html tables in a page
+html_table_data <- html %>% html_nodes("table") %>% html_table(fill = TRUE) 
+
+# stock prices 
+other_stock_data <- html_table_data[[3]]
+
+```
+
+***
+
+#### Functions used to extract data from Yahoo finance page and pre-process data.
+
+```{r function_to_extract_individual_stock_data_from_yahoo, message=FALSE, warning=FALSE}
+
+getImpactedStocksData = function(impacted_stocks_df) {
+  
+  stock_names <- pull(impacted_stocks_df, `Security (symbol)`)
+  #print(stock_names)
+  
+  stock_codes <- stock_names %>% 
+                  str_extract("\\(+([A-Z]{2,4})\\)+") %>% 
+                  str_extract("[A-Z]{2,4}")
+  #print(stock_codes)
+  
+  impacted_stock_price_df <- data.frame()
+  
+  for ( stock_cd in stock_codes) { 
+    #print(stock_cd)
+    stock_price_df <- getHistoricalStockPriceByStockCode(stock_cd)
+    impacted_stock_price_df <- rbind(impacted_stock_price_df, stock_price_df)
+  }
+  
+  impacted_stock_price_df
+}
+
+getHistoricalStockPriceByStockCode = function(stock_code) {
+  url <- paste0("https://finance.yahoo.com/quote/", stock_code, "/history/")
+  #print(url)
+  stock_price_df_list <- url %>%
+                      read_html(url) %>%
+                      html_nodes("table") %>% 
+                      html_table(fill = TRUE)
+  
+  stock_price_df <- stock_price_df_list[[1]]
+  
+  # removed NA records
+  stock_price_df <- head(stock_price_df, -1)
+  
+  stock_price_df$Date <- mdy(stock_price_df$Date)
+  stock_price_df$Open <-as.numeric(stock_price_df$Open)
+  stock_price_df$High <-as.numeric(stock_price_df$High)
+  stock_price_df$Low <-as.numeric(stock_price_df$Low)
+  stock_price_df$`Close*` <-as.numeric(stock_price_df$`Close*`)
+  stock_price_df$`Adj Close**` <-as.numeric(stock_price_df$`Adj Close**`)
+  stock_price_df$`Volume` <-as.numeric(gsub(",", "", stock_price_df$Volume))
+  stock_price_df$`Stock Code` <- stock_code
+  
+  stock_price_df
+}
+
+```
+
+***
+
+#### Plot GameStop price/volume data over time using ggplot library.
+
+```{r gamestop_stock_plot, message=FALSE, warning=FALSE}
+
+gme_stock_df <- getHistoricalStockPriceByStockCode("GME")
+
+ggplot(data = gme_stock_df) +
+  geom_line(mapping = aes(x = Date, y = `Close*`, color = `Stock Code`)) +
+  labs(x = "Date", y = "Price") +
+  ggtitle("GameStop stock price over time.") +
+  theme(plot.title = element_text(size = 13)) + theme(plot.title = element_text(hjust = 0.5))
+  
+ggplot(data = gme_stock_df, mapping = aes(x = Date)) +
+  geom_col(mapping = aes(y = `Volume`, fill = `Stock Code`)) +
+  labs(x = "Date", y = "Volume") +
+  ggtitle("GameStop stock volume trade over time.") +
+  theme(plot.title = element_text(size = 13)) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+***
+
+#### Let's see other impacted stocks along with GameStop.
+
+```{r filter_other_impacted_stocks, message=FALSE, warning=FALSE}
+
+other_stock_data %>%
+  select(-`Ref.`)
+
+```
+
+***
+
+#### Below plot depicts how stock prices has changes during the course of this event.
+
+```{r other_impacted_stocks_price_over_time_plot, message=FALSE, warning=FALSE}
+
+impacted_stock_price_df <- getImpactedStocksData(other_stock_data)
+
+ggplot(data = impacted_stock_price_df) +
+  geom_line(mapping = aes(x = Date, y = `Close*`, color = `Stock Code`)) +
+  labs(x = "Date", y = "Stock Price") +
+  facet_wrap(~`Stock Code`, ncol = 3, scales = "free") +
+  ggtitle("Other Impacted Stocks Price Over Time.") +
+  theme(plot.title = element_text(size = 13)) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+***
+
+#### Below plot represents how many stocks are being traded during the course of this event.
+
+```{r other_impacted_stocks_volume_over_time_plot, message=FALSE, warning=FALSE}
+
+ggplot(data = impacted_stock_price_df) +
+  geom_col(mapping = aes(x = Date, y = `Volume`, fill = `Stock Code`)) +
+  labs(x = "Date", y = "Volume") +
+  facet_wrap(~`Stock Code`, ncol = 3, scales = "free") +
+  ggtitle("Other Impacted Stocks Volume Trade Over Time.") +
+  theme(plot.title = element_text(size = 13)) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+***
+
+#### Extracting wallstreetbets Reddit group data using RedditExtractorR package.
+
+```{r extract_data_from_reddit, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets <- get_reddit(subreddit = "wallstreetbets", page_threshold = 1, sort_by = "relevance")
+
+# sample reddit wallstreetbets data.
+reddit_wallstreetbets %>% select(post_date, author, subreddit, comment) %>% head()
+
+#reddit_wallstreetbets_250 <- get_reddit(subreddit = "wallstreetbets", page_threshold = 250, sort_by = "relevance", wait_time = 60)
+#write_csv(x = reddit_wallstreetbets_250, 
+#          file = "/Users/swaruprakshit/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/Final Project/final-project-submission/data/reddit_wallstreetbets_data_250.csv",
+#          na = "NA")
+
+
+```
+
+***
+
+#### Loading data from previously saved csv file. Let's take a look at Wallstreetbets data.
+
+```{r load_wallstreetbets_subreddit_data, message=FALSE, warning=FALSE}
+
+# reading it from previously saved data.
+reddit_wallstreetbets <- read.csv("data/reddit_wallstreetbets_data_150.csv", header = TRUE)
+  
+reddit_wallstreetbets %>% select(post_date, author, subreddit, comment) %>% head()
+
+```
+
+***
+
+#### RedditExtractorR package provides api's to created user network, let's explore and find out how reddit user's are connected?
+
+```{r network_analysis_of_wallstreetbets_with_most_no_of_comments, message=FALSE, warning=FALSE}
+
+#game_stop_urls <- reddit_urls(search_terms="gamestop", page_threshold = 1) # isolate some URLs
+#write_csv(x = game_stop_urls, 
+#          file = "/Users/swaruprakshit/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/Final Project/final-project-submission/data/game_stop_urls.csv",
+#          na = "NA")
+
+# reading data from previously saved file.
+game_stop_urls <- read_csv(file = "data/game_stop_urls.csv")
+game_stop_df <- game_stop_urls %>% filter(num_comments==max(game_stop_urls$num_comments)) %$% URL %>% reddit_content # get the contents of a small thread
+game_stop_user_network <- game_stop_df %>% user_network(include_author=FALSE, agg=TRUE) # extract the network
+game_stop_user_network$plot # explore the plot
+
+```
+
+***
+
+#### Extract data from Twitter using rtweet package. Twitter api has limitation of 18K records can be downloaded in every 15 min. In order to extract more data for analysis, apply delay. Also we need to make sure that every call gets unique tweet post. In achive that, used max_id attribute in twitter api. For a given extract, min of status_id represents oldest tweet in that extract which is used as max_id and be used as starting point of next extraction.
+
+```{r twitter_extractor, message=FALSE, warning=FALSE}
+
+api_key <- "5HzcNSBdFTpgQmQanbNBdA2jL"
+api_key_secret <- "4kLa5QZ04P56vIHedLztI1vZKjipwwC0xxGXrpWSOCRn8wU7vE"
+access_token <- "1209907587073884160-vLJDQdjQl6NgrYi0gStwltMfOo5HH5"
+access_token_secret <- "e3iwUh3xcZ0ZMvExou8NWUe0O2dvQSPm00ENo4vWTAkgU"
+app_name <- "MSDS_FINAL_PROJECT_APP"
+
+## authenticate via web browser
+token <- create_token(
+  app = app_name,
+  consumer_key = api_key,
+  consumer_secret = api_key_secret,
+  access_token = access_token,
+  access_secret = access_token_secret)
+
+# delay function taken number of seconds
+delay <- function(x) {
+  p1 <- proc.time()
+  Sys.sleep(x)
+  proc.time() - p1 # The cpu usage should be negligible
+}
+
+# function is responsible for extract data from twitter.
+twitter_data_extrctor <- function() {
+  
+  gamestop_short_squeeze_tweet_master_df <- data.frame()
+  prev_max_id <- "0"
+  for (i in 1:1) {
+    gamestop_short_squeeze_tweet <- search_tweets( q = "#$gme OR #shortsqueeze OR #gamestopshortsqueeze OR #gmeshortsqueeze OR #thebigshortsqueeze OR #gamestop OR #gme", 
+                                                   n = 18000, 
+                                                   type = "mixed", 
+                                                   include_rts = TRUE, 
+                                                   geocode = NULL,
+                                                   max_id = prev_max_id,
+                                                   token = bearer_token(),
+                                                   #retryonratelimit = TRUE,
+                                                   lang = "en")
+    
+    prev_max_id <- as.character(min(gamestop_short_squeeze_tweet$status_id))
+    gamestop_short_squeeze_tweet_master_df <- rbind(gamestop_short_squeeze_tweet_master_df, gamestop_short_squeeze_tweet)
+    # twitter api has rate limit to 18K records can be extracted in every 15 min.
+    # delay(900)
+  }
+  return (gamestop_short_squeeze_tweet_master_df)
+}
+
+# twitter data frame
+gamestop_short_squeeze_tweet_master_df <- twitter_data_extrctor()
+
+# sample twitter data.
+gamestop_short_squeeze_tweet_master_df %>%
+  select(user_id, status_id, created_at, screen_name, text) %>%
+  head()
+
+# used to save large data into csv format.
+#write_as_csv(x = gamestop_short_squeeze_tweet_master_df, file_name = "/Users/swaruprakshit/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/Final Project/final-project-submission/data/gamestop_short_squeeze_tweet_master_100k.csv", prepend_ids = TRUE, fileEncoding = "UTF-8")
+```
+
+***
+
+#### Loading data from previously saved csv file. Let's take a look at gamestop stop squeeze twitter's tweet data.
+
+```{r load_gamestop_short_sequeeze_twitter_data, message=FALSE, warning=FALSE}
+
+gamestop_short_squeeze_tweet <- read_twitter_csv(file = "data/gamestop_short_squeeze_tweet_master_100k.csv", unflatten = FALSE)
+
+gamestop_short_squeeze_tweet %>% 
+  select(user_id, status_id, created_at, screen_name, text) %>%
+  head()
+
+```
+
+***
+
+#### Let's clean reddit user's comments and twitter's tweet for further analysis.
+
+```{r clean_data_function, message=FALSE, warning=FALSE}
+
+# Function for data cleaning
+f_gsub_clean_data <- function (data) {
+  
+  # remove at people
+  clean_data = gsub('@\\w+', '', data)
+  # remove punctuation
+  clean_data = gsub('[[:punct:]]', '', clean_data)
+  # remove numbers
+  clean_data = gsub('[[:digit:]]', '', clean_data)
+  # remove html links
+  clean_data = gsub('http\\w+', '', clean_data)
+  # remove unnecessary spaces
+  clean_data = gsub('[ \t]{2,}', '', clean_data)
+  clean_data = gsub('^\\s+|\\s+$', '', clean_data)
+  # remove emojis or special characters
+  clean_data = gsub('<.*>', '', enc2native(clean_data))
+  # to lowercase
+  clean_data = tolower(clean_data)
+  # change character encoding
+  clean_data = iconv(clean_data, to="utf-8-mac")
+  
+  clean_data
+}
+
+reddit_wallstreetbets_comments_clean <- f_gsub_clean_data(reddit_wallstreetbets$comment)
+gamestop_short_squeeze_tweet_clean <- f_gsub_clean_data(gamestop_short_squeeze_tweet$text)
+```
+
+***
+
+#### Let's try to leverage R package Syuzhet to do sentiment analysis.
+
+The package comes with four sentiment dictionaries and provides a method for accessing the robust, but computationally expensive, sentiment extraction tool developed in the NLP group at Stanford. Use of this later method requires that you have already installed the coreNLP package (see http://nlp.stanford.edu/software/corenlp.shtml).
+
+#### Let's explore how sentiment trajectory looks like over narrative time.
+
+```{r syuzhet_get_sentiment_plot, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_clean_sentiment <- syuzhet::get_sentiment(reddit_wallstreetbets_comments_clean)
+gamestop_short_squeeze_tweet_clean_sentiment <- syuzhet::get_sentiment(gamestop_short_squeeze_tweet_clean)
+  
+plot(
+  reddit_wallstreetbets_comments_clean_sentiment, 
+  type = "l", 
+  main = "Reddit Wallstreetbets Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "blue"
+)
+
+plot(
+  gamestop_short_squeeze_tweet_clean_sentiment, 
+  type = "l", 
+  main = "Gamestop Short Squeeze Twitter Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "red"
+)
+```
+
+***
+
+#### As we see from above plot that very difficult to interpret the polarity of sentiment. syuzhet packages provides another function get_percentage_values(...) which divides text into equal number of chunks and then calculates the mean sentiment valence for each. In this plot used bin = 500 represents chunk size.
+
+```{r sentiment_analysis_by_percentage_bin_500, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_clean_vector <- syuzhet::get_sentiment(reddit_wallstreetbets_comments_clean, method = "syuzhet")
+gamestop_short_squeeze_tweet_clean_vector <- syuzhet::get_sentiment(gamestop_short_squeeze_tweet_clean, method = "syuzhet")
+
+reddit_wallstreetbets_comments_clean_percentage_sentiment <-  syuzhet::get_percentage_values(reddit_wallstreetbets_comments_clean_vector, bins = 500)
+
+gamestop_short_squeeze_tweet_clean_percentage_sentiment <-  syuzhet::get_percentage_values(gamestop_short_squeeze_tweet_clean_vector, bins = 500)
+
+
+plot(
+  reddit_wallstreetbets_comments_clean_percentage_sentiment, 
+  type = "l", 
+  main = "Reddit Wallstreetbets Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "blue"
+)
+
+plot(
+  gamestop_short_squeeze_tweet_clean_percentage_sentiment, 
+  type = "l", 
+  main = "Gamestop Short Squeeze Twitter Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "red"
+)
+```
+
+***
+
+#### As per plot using chunk size as 500, it's hard to interpretate sentiment tracjectory. Let's try chunk value as 1000 and see if plot is getting any better?  
+
+```{r sentiment_analysis_by_percentage_bin_1000, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_clean_percentage_sentiment <- syuzhet::get_percentage_values(reddit_wallstreetbets_comments_clean_vector, bins = 1000)
+
+gamestop_short_squeeze_tweet_clean_percentage_sentiment <- syuzhet::get_percentage_values(gamestop_short_squeeze_tweet_clean_vector, bins = 1000)
+
+plot(
+  reddit_wallstreetbets_comments_clean_percentage_sentiment, 
+  type = "l", 
+  main = "Reddit Wallstreetbets Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "blue"
+)
+
+plot(
+  reddit_wallstreetbets_comments_clean_percentage_sentiment, 
+  type = "l", 
+  main = "Gamestop Short Squeeze Twitter Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "red"
+)
+
+```
+
+Explanation:- Unfortunately, percentage value approach does not explain emotional valance trajectory due to following reason,
+1. Combining larger chunk (i.e. 500 or 1000 sentence) contains wide range of emotion values than 100 sentence chunk. . Indeed, the means of longer passages tend to converge toward 0.   
+2. In addition to that, emotion valance changes corpus to corpus. Grouping corpus might be get the sentiment trajectory. Syuzhet package provides two alternatives to percentage-based comparison using either the Fourier or Discrete Cosine Transformations in combination with a low pass filter. 
+
+*** 
+
+#### Emotional Valance analysis using Fourior Transformation technique (i.e.get_transformed_values(...))
+
+```{r fourior_transformation_plot, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_clean_vector <- syuzhet::get_sentiment(reddit_wallstreetbets_comments_clean, method = "syuzhet")
+
+reddit_wallstreetbets_comments_clean_vector_ft_values <- syuzhet::get_transformed_values(reddit_wallstreetbets_comments_clean_vector, 
+                                                                   low_pass_size = 3, 
+                                                                   x_reverse_len = 100,
+                                                                   padding_factor = 2,
+                                                                   scale_vals = TRUE,
+                                                                   scale_range = FALSE
+                                                                  )
+
+gamestop_short_squeeze_tweet_clean_vector_ft_values <- syuzhet::get_transformed_values(gamestop_short_squeeze_tweet_clean_vector, 
+                                                                   low_pass_size = 3, 
+                                                                   x_reverse_len = 100,
+                                                                   padding_factor = 2,
+                                                                   scale_vals = TRUE,
+                                                                   scale_range = FALSE
+                                                                  )
+
+
+plot(
+  reddit_wallstreetbets_comments_clean_vector_ft_values, 
+  type = "l", 
+  main ="Reddit Wallstreetbets Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "blue"
+)
+
+plot(
+  gamestop_short_squeeze_tweet_clean_vector_ft_values, 
+  type = "l", 
+  main ="Gamestop Short Squeeze Twitter Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "red"
+)
+
+```
+
+***
+
+#### Emotional Valance analysis using Discrete Cosine Transformations technique (i.e.get_dct_transform(...))
+
+```{r discrete_cosine_transformation_plot, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_clean_vector_dct_values <- syuzhet::get_dct_transform(reddit_wallstreetbets_comments_clean_vector, 
+                                                                   low_pass_size = 5, 
+                                                                   x_reverse_len = 100,
+                                                                   scale_vals = FALSE,
+                                                                   scale_range = TRUE
+                                                                  )
+
+gamestop_short_squeeze_tweet_clean_vector_dct_values <- syuzhet::get_dct_transform(gamestop_short_squeeze_tweet_clean_vector, 
+                                                                   low_pass_size = 5, 
+                                                                   x_reverse_len = 100,
+                                                                   scale_vals = FALSE,
+                                                                   scale_range = TRUE
+                                                                  )
+
+plot(
+  reddit_wallstreetbets_comments_clean_vector_dct_values, 
+  type = "l", 
+  main = "Reddit Wallstreetbets Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "blue"
+)
+
+plot(
+  gamestop_short_squeeze_tweet_clean_vector_dct_values, 
+  type = "l", 
+  main = "Gamestop Short Squeeze Twitter Sentiment Trajectory Over Narrive Time", 
+  xlab = "Narrative Time", 
+  ylab = "Emotional Valence",
+  col = "red"
+)
+
+```
+
+Explanation:- Main advantage is in its better representation of edge values in the smoothed version of the sentiment vector.
+
+***
+
+#### The simple_plot function takes a sentiment vector and applies three smoothing methods. The smoothers include a moving average, loess, and discrete cosine transformation. This function produces two plots stacked. The first shows all three smoothing methods on the same graph. The second graph shows only the DCT smoothed line, but does so on a normalized time axis. The shape of the DCT line in both the top and bottom graphs are identical.
+
+```{r syuzhet_simple_plot, message=FALSE, warning=FALSE}
+
+# Reddit Wallstreetbets
+syuzhet::simple_plot(reddit_wallstreetbets_comments_clean_vector)
+
+# Gamestop short squeeze twitter sentiment
+syuzhet::simple_plot(gamestop_short_squeeze_tweet_clean_vector)
+
+```
+
+***
+
+#### Emotional Valance using NRC lexicon dictianary. 
+
+```{r syuzhet_nrc_sentiment_analysis_plot, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_nrc_sentiment <- reddit_wallstreetbets_comments_clean %>%
+                                                  syuzhet::get_sentences() %>%
+                                                  syuzhet::get_nrc_sentiment() 
+
+gamestop_short_squeeze_tweet_nrc_sentiment <- gamestop_short_squeeze_tweet_clean %>%
+                                                  syuzhet::get_sentences() %>%
+                                                  syuzhet::get_nrc_sentiment() 
+
+barplot(
+  sort(colSums(prop.table(reddit_wallstreetbets_comments_nrc_sentiment[, 1:8]))), 
+  horiz = TRUE, 
+  cex.names = 0.7, 
+  las = 1, 
+  main = "Emotions in Wallstreetbets Subreddit Group Comments", 
+  xlab = "Percentage"
+)
+
+barplot(
+  sort(colSums(prop.table(gamestop_short_squeeze_tweet_nrc_sentiment[, 1:8]))), 
+  horiz = TRUE, 
+  cex.names = 0.7, 
+  las = 1, 
+  main = "Emotions in Gamestop Short Squeeze Twitter Comments", 
+  xlab = "Percentage"
+)
+
+```
+
+Explanation:- trust and anticipation top 2 sentiment category in Reddit Wallstreetbets comments, gamestop short queeze twitter tweets. In case of Reddit Wallstreetbets group comments, more than 20% comments are trust related whereas gamestop short squeeze tweets are also more than 20% related to trust and anticipation.
+
+***
+
+#### Comparitive study of Sentiment Analysis using lexicon dictionary from syuzhet package. 
+
+```{r comparitive_study_of_sentiment_analysis_by_lexicon_using_syuzhet, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_comments_sentiment_text <- 
+  list(reddit_wallstreetbets_comment = reddit_wallstreetbets_comments_clean) %>%
+                    lapply(syuzhet::get_sentences)
+
+gamestop_short_squeeze_tweet_sentiment_text <- 
+  list(gamestop_short_squeeze_tweet = gamestop_short_squeeze_tweet_clean) %>%
+                    lapply(syuzhet::get_sentences)
+
+syuzhet_multiple_sentiment <- function(sentences) {
+  list(
+    bing = syuzhet::get_sentiment(sentences, method = "bing"),
+    afinn = syuzhet::get_sentiment(sentences, method = "afinn"),
+    nrc = syuzhet::get_sentiment(sentences, method = "nrc"),
+    syuzhet = syuzhet::get_sentiment(sentences, method = "syuzhet")
+  )
+}
+
+reddit_wallstreetbets_comments_sentiment <- reddit_wallstreetbets_comments_sentiment_text %>% 
+  lapply(syuzhet_multiple_sentiment)
+
+gamestop_short_squeeze_tweet_sentiment <- gamestop_short_squeeze_tweet_sentiment_text %>%
+                                            lapply(syuzhet_multiple_sentiment)
+
+sum_up_sentiment <- function(x) {
+  apply_sentiment <- function(vec) {
+    list(sum = sum(vec),
+         mean = mean(vec),
+         summary = summary(vec))
+  }
+  
+  if(is.list(x))
+    lapply(x, apply_sentiment)
+  else
+    apply_sentiment(x)
+}
+
+reddit_wallstreetbets_comments_sentiment %>% 
+  lapply(sum_up_sentiment) %>% 
+  list.unzip()
+
+gamestop_short_squeeze_tweet_sentiment %>%
+  lapply(sum_up_sentiment) %>% 
+  list.unzip()
+
+plot_sentiment <- function(x, title) {
+  plot(x,
+       type = "l",
+       main = title,
+       xlab = "Narrative time",
+       ylab = "Emotion valance",
+       # ylim = c(-1.5, 3.25) # roughly the min and the max
+       )
+  abline(h = 0, col = 3, lty = 2) # neutral sentiment
+}
+
+reddit_wallstreetbets_comments_sentiment %>% 
+  list.flatten() %>% 
+  lapply(syuzhet::get_percentage_values) %>% 
+  Map(plot_sentiment, ., names(.))
+
+gamestop_short_squeeze_tweet_sentiment %>%
+  list.flatten() %>% 
+  lapply(syuzhet::get_percentage_values) %>% 
+  Map(plot_sentiment, ., names(.))
+
+```
+
+***
+
+#### Sentiment Analysis Using Syuzhet's get_nrc_sentiment(...).
+
+```{r syuzhet_nrc_sentiment_plot2, message=FALSE, warning=FALSE}
+
+bind_pos <- function(df) {
+  pos <- data.frame(position = 1:nrow(df))
+  cbind(df, pos)
+}
+
+plot_nrc <- function(df, title) {
+  ggplot(df, aes(x = position, y = value, color = emotion)) +
+    geom_smooth(size = 2, se = FALSE) +
+    xlab("Narrative position") +
+    ylab("Prevalence") +
+    theme_classic() +
+    ggtitle(title)
+}
+
+reddit_wallstreetbets_comments_sentiment_text %>% 
+  lapply(syuzhet::get_nrc_sentiment) %>% 
+  lapply(bind_pos) %>% 
+  lapply(gather, emotion, value, -position, -negative, -positive) %>% 
+  Map(plot_nrc, ., names(.))
+
+gamestop_short_squeeze_tweet_sentiment_text %>% 
+  lapply(syuzhet::get_nrc_sentiment) %>% 
+  lapply(bind_pos) %>% 
+  lapply(gather, emotion, value, -position, -negative, -positive) %>% 
+  Map(plot_nrc, ., names(.))
+
+```
+
+Explanation:- after processing more than 80K reddit wallstreetbets comments / gamestop short squeeze twitter tweet found that trust and anticipation are top most emotion stand out. Above chart depicts that over the 80K narrative, how various categories are sentiment changes and trust and anticipantion are top most emotion in that case as well. 
+
+*** 
+
+#### sentimentR package is designed to quickly calculate text polarity sentiment at the sentence level and optionally aggregate by rows or grouping variable(s).  
+
+##### Limitations of syuzhet package
+
+Matthew Jockers created the syuzhet package that utilizes dictionary lookups for the Bing, NRC, and Afinn methods as well as a custom dictionary. He also utilizes a wrapper for the Stanford coreNLP which uses much more sophisticated analysis. Jocker’s dictionary methods are fast but are more prone to error in the case of valence shifters.
+
+##### So what does sentimentr do that other packages don’t and why does it matter?
+
+sentimentr attempts to take into account valence shifters (i.e., negators, amplifiers (intensifiers), de-amplifiers (downtoners), and adversative conjunctions) while maintaining speed. Simply put, sentimentr is an augmented dictionary lookup. The next questions address why it matters.
+
+##### So what are these valence shifters?
+
+* A negator flips the sign of a polarized word (e.g., “I do not like it.”). See lexicon::hash_valence_shifters[y==1] for examples. 
+* An amplifier (intensifier) increases the impact of a polarized word (e.g., “I really like it.”). See lexicon::hash_valence_shifters[y==2] for examples. 
+* A de-amplifier (downtoner) reduces the impact of a polarized word (e.g., “I hardly like it.”). See lexicon::hash_valence_shifters[y==3] for examples. 
+* An adversative conjunction overrules the previous clause containing a polarized word (e.g., “I like it but it’s not worth it.”). See lexicon::hash_valence_shifters[y==4] for examples.
+
+##### Do valence shifters really matter?
+
+Well valence shifters affect the polarized words. In the case of negators and adversative conjunctions the entire sentiment of the clause may be reversed or overruled. So if valence shifters occur fairly frequently a simple dictionary lookup may not be modeling the sentiment appropriately. You may be wondering how frequently these valence shifters co-occur with polarized words, potentially changing, or even reversing and overruling the clause’s sentiment. The table below shows the rate of sentence level co-occurrence of valence shifters with polarized words across a few types of texts.
+
+***
+
+#### Let's take an example to understand how valance shifter works in sentimentr package.
+
+```{r sentimentr_package_into, message=FALSE, warning=FALSE}
+
+c("I do not like it.", "I really like it.", "I hardly like it.", "I like it but it’s not worth it.") %>%
+  get_sentences() %>%
+  sentiment()
+
+```
+
+
+***
+
+#### Impact of Valance Shifter in Reddit Wallstreetbets subreddit group's comments and Gamestop short squeeze twitter comments.
+
+```{r valance_shifter_imapact_sentimentr_package, message=FALSE, warning=FALSE}
+
+comments_attributes_rate <- list(
+  sentiment_attributes(reddit_wallstreetbets_comments_clean),
+  sentiment_attributes(gamestop_short_squeeze_tweet_clean)
+) %>%
+  lapply(function(y){
+    x <- y[['Polarized_Cooccurrences']]
+    data.frame(setNames(as.list(f_prop2percent(x[[2]], 0)), gsub('-', '', x[[1]])), 
+               stringsAsFacto1rs = FALSE, check.names = FALSE)
+  }) %>%
+  setNames(c('Reddit Wallstreetbets Comments', 'Gamestop Short Squeeze Twitter Comments')) %>%
+  tidy_list('text')
+
+comments_attributes_rate
+
+```
+
+
+***
+
+#### Determine Profanity of Reddit's Wallstreetbets comments using sentimentr package.
+
+```{r reddit_wallstreetbets_profanity_plot_sentimentr_package, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_clean_df <- reddit_wallstreetbets %>%
+                                    mutate(clean_comments = f_gsub_clean_data(comment))
+
+reddit_wallstreetbets_clean_df$clean_comments %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::profanity() %>%
+  plot()
+
+```
+
+***
+
+#### Determine Profanity of Gamestop short squeeze twitter tweets using sentimentr package.
+
+``` {r gamestop_short_squeeze_twitter_tweet_profanity_plot_sentimentr_package, message=FALSE, warning=FALSE}
+
+gamestop_short_squeeze_tweet_clean_df <- gamestop_short_squeeze_tweet %>%
+                                           mutate(clean_tweet = f_gsub_clean_data(text))
+
+gamestop_short_squeeze_tweet_clean_df$clean_tweet %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::profanity() %>%
+  plot()
+
+```
+
+
+***
+
+#### Extact Profanity terms using sentimentr package.
+
+```{r extract_prafanity_terms_by_sentimentr_package, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_profanity_df <- reddit_wallstreetbets_clean_df$clean_comments %>%
+                                        sentimentr::get_sentences() %>%
+                                        sentimentr::extract_profanity_terms() %>%
+                                        attributes() 
+
+reddit_wallstreetbets_profanity_df$counts %>%
+  head()
+
+gamestop_short_squeeze_tweet_profanity_df <- gamestop_short_squeeze_tweet_clean_df$clean_tweet %>%
+                                              sentimentr::get_sentences() %>%
+                                              sentimentr::extract_profanity_terms() %>%
+                                              attributes()
+
+gamestop_short_squeeze_tweet_profanity_df$counts %>%
+  head()
+```
+
+***
+
+#### Determine emotion valance of reddit wallstreetbets group comments using sentimentr package. 
+
+```{r reddit_wallstreetbets_emotion_valance_plot_by_sentimentr_package, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_clean_df$clean_comments %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::emotion() %>%
+  plot(drop.unused.emotions = TRUE)
+
+```
+Explanation:- It happened to be trust and anticipation are top most emotion valance as per sentimentr package as well.
+
+***
+
+#### Determine emotion valance of gamestop short squeeze twitter's tweet using sentimentr package. 
+
+```{r gamestop_short_squeeze_twitter_tweet_emotion_valance_plot_by_sentimentr_package, message=FALSE, warning=FALSE}
+
+gamestop_short_squeeze_tweet_clean_df$clean_tweet %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::emotion() %>%
+  plot(drop.unused.emotions = TRUE)
+
+```
+Explanation:- It happened to be trust and anticipation are top most emotion valance as per sentimentr package as well.
+
+***
+
+#### Extract emotion terms using sentimentr package.
+
+```{r extract_emotion_terms_by_sentimentr_package, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_emotion_df <- reddit_wallstreetbets_clean_df$clean_comments %>%
+                                      sentimentr::get_sentences() %>%
+                                      sentimentr::extract_emotion_terms() %>%
+                                      attributes()
+
+reddit_wallstreetbets_emotion_df$counts %>%
+  distinct(words) %>%
+  head()
+
+gamestop_short_squeeze_tweet_emotion_df <- gamestop_short_squeeze_tweet_clean_df$clean_tweet %>%
+                                            sentimentr::get_sentences() %>%
+                                            sentimentr::extract_emotion_terms() %>%
+                                            attributes()
+
+gamestop_short_squeeze_tweet_emotion_df$counts %>%
+  distinct(words) %>%
+  head()
+```
+
+
+***
+
+#### Highlights sentiment using sentimentr package.
+
+```{r highlights_position_negative_sentiment_by_sentimentr_package, message=FALSE, warning=FALSE}
+
+reddit_wallstreetbets_clean_df$clean_comments %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::sentiment_by() %>%
+  sentimentr::highlight(file = "/Users/swaruprakshit/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/Final Project/final-project-submission/reddit_wallstreetbets_comment_sentimentr_package_highlight.html")
+
+gamestop_short_squeeze_tweet_clean_df$clean_tweet %>%
+  sentimentr::get_sentences() %>%
+  sentimentr::sentiment_by() %>%
+  sentimentr::highlight(file = "/Users/swaruprakshit/Documents/MSDS - Rutgers/Spring-2021/16-954-597-01-DATA-WRANGLING/Final Project/final-project-submission/gamestop_short_squeeze_twitter_tweet_sentimentr_package_highlight.html")
+
+```
+
+
+Explanation:- Highlight files should have been created in current working directory. Reddit Wallstreetbets sentiment highlighted in reddit_wallstreetbets_comment_sentimentr_package_highlight.html. Twitter's  tweet sentiment highlighted in gamestop_short_squeeze_twitter_tweet_sentimentr_package_highlight.html.
+
+***
+
